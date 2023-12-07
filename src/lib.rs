@@ -116,16 +116,16 @@ where
 ///
 /// ```
 /// # use prelude::*;
-/// assert!(identical(&[1, 1, 1]));
-/// assert!(!identical(&[1, 2, 1]));
+/// assert!(homogenous(&[1, 1, 1]));
+/// assert!(!homogenous(&[1, 2, 1]));
 /// ```
 ///
 /// Also works with iterators:
 /// ```
 /// # use prelude::*;
-/// assert!(identical([9, 1, 1].iter().skip(1)));
+/// assert!(homogenous([9, 1, 1].iter().skip(1)));
 /// ```
-pub fn identical<T>(coll: T) -> bool
+pub fn homogenous<T>(coll: T) -> bool
 where
     T: IntoIterator,
     T::Item: PartialEq,
