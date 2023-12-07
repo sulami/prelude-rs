@@ -6,11 +6,22 @@ use core::{
 };
 
 /// An iterator that can return its items in chunks instead of one by
-/// one. See [`Chunks`].
+/// one.
 pub trait Chunkable {
     /// Return chunks of items. If the iterator runs out without
     /// filling up the last chunk, the item's [`Default::default`]
-    /// will be used to fill up the last chunk.
+    ///
+    /// After the last chunk, calls to [`Chunks::next`] return [`None`].
+    ///
+    /// ```
+    /// # use prelude::*;
+    /// let mut iter = (0u8..10).chunks::<3>();
+    /// assert_eq!(iter.next(), Some([0,1,2]));
+    /// assert_eq!(iter.next(), Some([3,4,5]));
+    /// assert_eq!(iter.next(), Some([6,7,8]));
+    /// assert_eq!(iter.next(), Some([9,0,0]));
+    /// assert_eq!(iter.next(), None);
+    /// ```
     fn chunks<const N: usize>(self) -> Chunks<Self, N>
     where
         Self: Iterator + Sized,
@@ -18,20 +29,7 @@ pub trait Chunkable {
 }
 
 /// An iterator that returns items from the wrapped iterator in chunks
-/// of `N`. If the last chunk cannot be filled completely, it is
-/// filled up with [`Default::default`].
-///
-/// After the last chunk, calls to [`Chunks::next`] return [`None`].
-///
-/// ```
-/// # use prelude::*;
-/// let mut iter = (0u8..10).chunks::<3>();
-/// assert_eq!(iter.next(), Some([0,1,2]));
-/// assert_eq!(iter.next(), Some([3,4,5]));
-/// assert_eq!(iter.next(), Some([6,7,8]));
-/// assert_eq!(iter.next(), Some([9,0,0]));
-/// assert_eq!(iter.next(), None);
-/// ```
+/// of `N`. Created by [`chunks`](Chunkable::chunks).
 pub struct Chunks<I, const N: usize>
 where
     I: Iterator,
@@ -180,6 +178,113 @@ where
             }
         }
         None
+    }
+}
+
+/// An iterator that can produce overlapping windows of its items.
+pub trait Overlappable {
+    /// Return overlapping windows of items. Stops as soon as the
+    /// window cannot be filled.
+    ///
+    /// ```
+    /// # use prelude::*;
+    /// let mut iter = (0u8..=5).overlapping_windows::<3>();
+    /// assert_eq!(iter.next(), Some([0, 1, 2]));
+    /// assert_eq!(iter.next(), Some([1, 2, 3]));
+    /// assert_eq!(iter.next(), Some([2, 3, 4]));
+    /// assert_eq!(iter.next(), Some([3, 4, 5]));
+    /// assert_eq!(iter.next(), None);
+    /// ```
+    fn overlapping_windows<const N: usize>(self) -> OverlappingWindows<Self, N>
+    where
+        Self: Iterator + Sized,
+        Self::Item: Copy;
+}
+
+/// An iterator that produces overlapping windows of the wrapped
+/// iterator. Created by
+/// [`overlapping_windows`](Overlappable::overlapping_windows).
+pub struct OverlappingWindows<I, const N: usize>
+where
+    I: Iterator,
+    I::Item: Copy,
+{
+    iter: I,
+    finished: bool,
+    head: usize,
+    buf: [Option<I::Item>; N],
+}
+
+impl<I, const N: usize> Iterator for OverlappingWindows<I, N>
+where
+    I: Iterator,
+    I::Item: Copy,
+{
+    type Item = [I::Item; N];
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.finished {
+            return None;
+        }
+
+        if self.buf[0].is_none() {
+            // Fresh buffer, initialise.
+            for slot in self.buf.iter_mut() {
+                match self.iter.next() {
+                    Some(item) => {
+                        *slot = Some(item);
+                    }
+                    None => {
+                        self.finished = true;
+                        return None;
+                    }
+                }
+            }
+        } else {
+            // Fetch the next item.
+            match self.iter.next() {
+                Some(item) => {
+                    self.buf[self.head] = Some(item);
+                    self.head = (self.head + 1) % N;
+                }
+                None => {
+                    self.finished = true;
+                    return None;
+                }
+            }
+        }
+
+        let mut rv = [self.buf[0].unwrap(); N];
+        self.buf
+            .iter()
+            .skip(self.head)
+            .enumerate()
+            .for_each(|(i, item)| rv[i] = item.unwrap());
+        self.buf
+            .iter()
+            .take(self.head)
+            .enumerate()
+            .for_each(|(i, item)| rv[N - self.head + i] = item.unwrap());
+
+        Some(rv)
+    }
+}
+
+impl<I> Overlappable for I
+where
+    I: Iterator + Sized,
+    I::Item: Copy,
+{
+    fn overlapping_windows<const N: usize>(self) -> OverlappingWindows<Self, N> {
+        if N == 0 {
+            panic!("window size 0 is invalid");
+        }
+        OverlappingWindows {
+            iter: self,
+            finished: false,
+            head: 0,
+            buf: [None; N],
+        }
     }
 }
 
