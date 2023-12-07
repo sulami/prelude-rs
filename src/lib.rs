@@ -5,6 +5,18 @@ use core::{
     ops::{Add, Div, Range, Sub},
 };
 
+/// An iterator that can return its items in chunks instead of one by
+/// one. See [`Chunks`].
+pub trait Chunkable {
+    /// Return chunks of items. If the iterator runs out without
+    /// filling up the last chunk, the item's [`Default::default`]
+    /// will be used to fill up the last chunk.
+    fn chunks<const N: usize>(self) -> Chunks<Self, N>
+    where
+        Self: Iterator + Sized,
+        Self::Item: Default + Copy;
+}
+
 /// An iterator that returns items from the wrapped iterator in chunks
 /// of `N`. If the last chunk cannot be filled completely, it is
 /// filled up with [`Default::default`].
@@ -46,18 +58,6 @@ where
         }
         Some(rv)
     }
-}
-
-/// An iterator that can return its items in chunks instead of one by
-/// one. See [`Chunks`].
-pub trait Chunkable {
-    /// Return chunks of items. If the iterator runs out without
-    /// filling up the last chunk, the item's [`Default::default`]
-    /// will be used to fill up the last chunk.
-    fn chunks<const N: usize>(self) -> Chunks<Self, N>
-    where
-        Self: Iterator + Sized,
-        Self::Item: Default + Copy;
 }
 
 impl<I> Chunkable for I
@@ -141,6 +141,46 @@ where
         }
     }
     true
+}
+
+/// An iterator that can be searched by inspecting two elements at a
+/// time.
+pub trait WindowSearchable {
+    type Item;
+
+    /// Search the iterator by looking at two items at a time. Returns
+    /// the first pair that matches the predicate.
+    ///
+    /// ```
+    /// # use prelude::*;
+    /// assert_eq!([1, 2, 3, 3, 4, 5].iter().window_search(|a, b| a == b), Some((&3, &3)));
+    /// ```
+    fn window_search<F>(self, f: F) -> Option<(Self::Item, Self::Item)>
+    where
+        F: Fn(Self::Item, Self::Item) -> bool;
+}
+
+impl<I> WindowSearchable for I
+where
+    I: Iterator,
+    I::Item: Copy,
+{
+    type Item = I::Item;
+
+    fn window_search<F>(mut self, f: F) -> Option<(I::Item, I::Item)>
+    where
+        F: Fn(I::Item, I::Item) -> bool,
+    {
+        if let Some(mut item) = self.next() {
+            for other in self {
+                if f(item, other) {
+                    return Some((item, other));
+                }
+                item = other;
+            }
+        }
+        None
+    }
 }
 
 #[cfg(test)]
