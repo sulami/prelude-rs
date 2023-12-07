@@ -48,7 +48,12 @@ where
     }
 }
 
+/// An iterator that can return its items in chunks instead of one by
+/// one. See [`Chunks`].
 pub trait Chunkable {
+    /// Return chunks of items. If the iterator runs out without
+    /// filling up the last chunk, the item's [`Default::default`]
+    /// will be used to fill up the last chunk.
     fn chunks<const N: usize>(self) -> Chunks<Self, N>
     where
         Self: Iterator + Sized,
@@ -107,6 +112,35 @@ where
     }
 
     lower
+}
+
+/// Returns true if all elements in `coll` are equal.
+///
+/// ```
+/// # use prelude::*;
+/// assert!(identical(&[1, 1, 1]));
+/// assert!(!identical(&[1, 2, 1]));
+/// ```
+///
+/// Also works with iterators:
+/// ```
+/// # use prelude::*;
+/// assert!(identical([9, 1, 1].iter().skip(1)));
+/// ```
+pub fn identical<T, ITEM>(coll: T) -> bool
+where
+    T: IntoIterator<Item = ITEM>,
+    ITEM: PartialEq,
+{
+    let mut iter = coll.into_iter();
+    if let Some(item) = iter.next() {
+        for other in iter {
+            if other != item {
+                return false;
+            }
+        }
+    }
+    true
 }
 
 #[cfg(test)]
