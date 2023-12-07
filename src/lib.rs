@@ -127,10 +127,10 @@ where
 /// # use prelude::*;
 /// assert!(identical([9, 1, 1].iter().skip(1)));
 /// ```
-pub fn identical<T, ITEM>(coll: T) -> bool
+pub fn identical<T>(coll: T) -> bool
 where
-    T: IntoIterator<Item = ITEM>,
-    ITEM: PartialEq,
+    T: IntoIterator,
+    T::Item: PartialEq,
 {
     let mut iter = coll.into_iter();
     if let Some(item) = iter.next() {
