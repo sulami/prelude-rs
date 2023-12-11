@@ -2,6 +2,7 @@
 
 use core::{
     cmp::Ordering,
+    mem::swap,
     ops::{Add, Div, Range, Sub},
 };
 
@@ -288,6 +289,54 @@ where
     }
 }
 
+/// Something that looks like an integer.
+pub trait Integeresque {
+    /// Least common multiple.
+    fn lcm(self, other: Self) -> Self;
+    /// Greatest common divisor.
+    fn gcd(self, other: Self) -> Self;
+}
+
+macro_rules! impl_integeresque {
+    ($t:ty) => {
+        impl Integeresque for $t {
+            fn lcm(self, other: Self) -> Self {
+                self * other / self.gcd(other)
+            }
+            fn gcd(self, other: Self) -> Self {
+                let mut max = self;
+                let mut min = other;
+                if min > max {
+                    swap(&mut max, &mut min);
+                }
+
+                loop {
+                    let res = max % min;
+                    if res == 0 {
+                        return min;
+                    }
+
+                    max = min;
+                    min = res;
+                }
+            }
+        }
+    };
+}
+
+impl_integeresque!(u8);
+impl_integeresque!(u16);
+impl_integeresque!(u32);
+impl_integeresque!(u64);
+impl_integeresque!(u128);
+impl_integeresque!(usize);
+impl_integeresque!(i8);
+impl_integeresque!(i16);
+impl_integeresque!(i32);
+impl_integeresque!(i64);
+impl_integeresque!(i128);
+impl_integeresque!(isize);
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -306,5 +355,21 @@ mod tests {
         assert_eq!(binary_search_range(0_i64..10, |i| { i.cmp(&3) }), 3);
         assert_eq!(binary_search_range(0_i128..10, |i| { i.cmp(&3) }), 3);
         assert_eq!(binary_search_range(0_isize..10, |i| { i.cmp(&3) }), 3);
+    }
+
+    #[test]
+    fn lcm_works_with_various_number_types() {
+        assert_eq!(3_u8.lcm(4), 12);
+        assert_eq!(3_u16.lcm(4), 12);
+        assert_eq!(3_u32.lcm(4), 12);
+        assert_eq!(3_u64.lcm(4), 12);
+        assert_eq!(3_u128.lcm(4), 12);
+        assert_eq!(3_usize.lcm(4), 12);
+        assert_eq!(3_i8.lcm(4), 12);
+        assert_eq!(3_i16.lcm(4), 12);
+        assert_eq!(3_i32.lcm(4), 12);
+        assert_eq!(3_i64.lcm(4), 12);
+        assert_eq!(3_i128.lcm(4), 12);
+        assert_eq!(3_isize.lcm(4), 12);
     }
 }
