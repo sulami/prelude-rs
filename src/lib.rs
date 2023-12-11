@@ -295,7 +295,7 @@ where
 
 impl<I> Overlappable for I
 where
-    I: Iterator + Sized,
+    I: Iterator,
     I::Item: Copy,
 {
     fn overlapping_windows<const N: usize>(self) -> OverlappingWindows<Self, N> {
@@ -358,6 +358,80 @@ impl_integeresque!(i32);
 impl_integeresque!(i64);
 impl_integeresque!(i128);
 impl_integeresque!(isize);
+
+/// An iterator which elements can be derived or integrated.
+pub trait Differential {
+    /// Returns the difference between each two items. By definition,
+    /// the resulting sequence is shorter by one than the original
+    /// one.
+    ///
+    /// ```
+    /// # use prelude::*;
+    /// let mut iter = [4, 8, 15, 16, 23, 42].iter().derivative();
+    /// assert_eq!(iter.next(), Some(4));
+    /// assert_eq!(iter.next(), Some(7));
+    /// assert_eq!(iter.next(), Some(1));
+    /// assert_eq!(iter.next(), Some(7));
+    /// assert_eq!(iter.next(), Some(19));
+    /// assert_eq!(iter.next(), None);
+    /// ```
+    fn derivative(self) -> Derivative<Self>
+    where
+        Self: Iterator + Sized,
+        Self::Item: Copy + Sub;
+}
+
+/// An iterator that returns the difference between the items of the
+/// wrapped iterator. Created by
+/// [`derivative`](Differential::derivative).
+pub struct Derivative<I>
+where
+    I: Iterator,
+    I::Item: Copy + Sub,
+{
+    iter: I,
+    last: Option<I::Item>,
+}
+
+impl<I> Iterator for Derivative<I>
+where
+    I: Iterator,
+    I::Item: Copy + Sub,
+{
+    type Item = <I::Item as Sub>::Output;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.last.is_none() {
+            match self.iter.next() {
+                None => return None,
+                Some(item) => {
+                    self.last = Some(item);
+                }
+            }
+        }
+        match self.iter.next() {
+            None => None,
+            Some(item) => {
+                let dx = item - self.last.unwrap();
+                self.last = Some(item);
+                Some(dx)
+            }
+        }
+    }
+}
+
+impl<I> Differential for I
+where
+    I: Iterator,
+    I::Item: Copy + Sub,
+{
+    fn derivative(self) -> Derivative<Self> {
+        Derivative {
+            iter: self,
+            last: None,
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
