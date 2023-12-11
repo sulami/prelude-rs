@@ -113,33 +113,55 @@ where
     lower
 }
 
-/// Returns true if all elements in `coll` are equal.
-///
-/// ```
-/// # use prelude::*;
-/// assert!(homogenous(&[1, 1, 1]));
-/// assert!(!homogenous(&[1, 2, 1]));
-/// ```
-///
-/// Also works with iterators:
-/// ```
-/// # use prelude::*;
-/// assert!(homogenous([9, 1, 1].iter().skip(1)));
-/// ```
-pub fn homogenous<T>(coll: T) -> bool
+/// A collection that can be homogenous or heterogenous.
+pub trait Genous {
+    /// Returns true if all elements in `coll` are equal.
+    ///
+    /// ```
+    /// # use prelude::*;
+    /// assert!([1, 1, 1].is_homogenous());
+    /// assert!(![1, 2, 1].is_homogenous());
+    /// ```
+    fn is_homogenous(&self) -> bool;
+
+    /// Returns true if the elements in `coll` are not all equal.
+    ///
+    /// ```
+    /// # use prelude::*;
+    /// assert!([1, 2, 1].is_heterogenous());
+    /// assert!(![1, 1, 1].is_heterogenous());
+    /// ```
+    fn is_heterogenous(&self) -> bool;
+}
+
+impl<T> Genous for T
 where
-    T: IntoIterator,
+    T: IntoIterator + Copy,
     T::Item: PartialEq,
 {
-    let mut iter = coll.into_iter();
-    if let Some(item) = iter.next() {
-        for other in iter {
-            if other != item {
-                return false;
+    fn is_homogenous(&self) -> bool {
+        let mut iter = self.into_iter();
+        if let Some(item) = iter.next() {
+            for other in iter {
+                if other != item {
+                    return false;
+                }
             }
         }
+        true
     }
-    true
+
+    fn is_heterogenous(&self) -> bool {
+        let mut iter = self.into_iter();
+        if let Some(item) = iter.next() {
+            for other in iter {
+                if other != item {
+                    return true;
+                }
+            }
+        }
+        false
+    }
 }
 
 /// An iterator that can be searched by inspecting two elements at a
