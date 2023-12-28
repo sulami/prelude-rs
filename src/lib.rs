@@ -1,10 +1,427 @@
-#![no_std]
+//! Mostly various extension traits for iterators, not too dissimilar
+//! from itertools. Optimised for personal use, but potentially
+//! generally useful.
+
+#![cfg_attr(not(feature = "std"), no_std)]
 
 use core::{
     cmp::Ordering,
-    mem::swap,
-    ops::{Add, Div, Range, Sub},
+    fmt::{self, Debug, Formatter},
+    mem::{swap, zeroed},
+    ops::{Add, Div, Index, Range, Sub},
 };
+
+/// Shared error type.
+#[derive(PartialEq, Eq, Debug)]
+pub enum PreludeError {
+    /// A data structure is full.
+    Full,
+}
+
+/// A stack-allocated ring buffer.
+///
+/// The default mode is FIFO, but it can be used as a LIFO stack as well.
+#[derive(Copy, Clone, Hash)]
+pub struct RingBuffer<T, const N: usize> {
+    buffer: [Option<T>; N],
+    start: usize,
+    end: usize,
+    full: bool,
+}
+
+impl<T, const N: usize> RingBuffer<T, N> {
+    /// Creates a new ring buffer, filling it with `elem`.
+    pub fn new() -> Self {
+        let buffer = unsafe { zeroed() };
+        Self {
+            buffer,
+            start: 0,
+            end: 0,
+            full: false,
+        }
+    }
+
+    /// Pushes `elem` into the buffer. Returns an error if the buffer
+    /// is full.
+    ///
+    /// ```
+    /// # use prelude::*;
+    /// let mut buffer = RingBuffer::<u32, 3>::new();
+    /// assert_eq!(buffer.try_push(1), Ok(()));
+    /// assert_eq!(buffer.try_push(2), Ok(()));
+    /// assert_eq!(buffer.try_push(3), Ok(()));
+    /// assert_eq!(buffer.try_push(4), Err(PreludeError::Full));
+    /// ```
+    pub fn try_push(&mut self, elem: T) -> Result<(), PreludeError> {
+        if self.is_full() {
+            return Err(PreludeError::Full);
+        }
+        self.push(elem);
+        Ok(())
+    }
+
+    /// Pushes `elem` into the buffer, overwriting the oldest element
+    /// if the buffer is full.
+    ///
+    /// ```
+    /// # use prelude::*;
+    /// let mut buffer = RingBuffer::<u32, 3>::new();
+    /// buffer.push(1);
+    /// buffer.push(2);
+    /// buffer.push(3);
+    /// buffer.push(4);
+    /// assert_eq!(buffer.pop(), Some(2));
+    /// assert_eq!(buffer.pop(), Some(3));
+    /// assert_eq!(buffer.pop(), Some(4));
+    /// ```
+    pub fn push(&mut self, elem: T) {
+        if self.is_full() {
+            self.start = (self.start + 1) % N;
+        }
+        self.buffer[self.end] = Some(elem);
+        self.end = (self.end + 1) % N;
+        if self.end == self.start {
+            self.full = true;
+        }
+    }
+
+    /// Pops an element from the ring buffer.
+    ///
+    /// ```
+    /// # use prelude::*;
+    /// let mut buffer = RingBuffer::from([1u32, 2, 3]);
+    /// assert_eq!(buffer.pop(), Some(1));
+    /// assert_eq!(buffer.pop(), Some(2));
+    /// assert_eq!(buffer.pop(), Some(3));
+    /// assert_eq!(buffer.pop(), None);
+    /// ```
+    pub fn pop(&mut self) -> Option<T>
+    where
+        T: Clone,
+    {
+        if self.is_empty() {
+            return None;
+        }
+        self.full = false;
+        let elem = self.buffer[self.start].take();
+        self.start = (self.start + 1) % N;
+        elem
+    }
+
+    /// Pops an element from the back of the ring buffer.
+    ///
+    /// ```
+    /// # use prelude::*;
+    /// let mut buffer = RingBuffer::from([1u32, 2, 3]);
+    /// assert_eq!(buffer.pop_back(), Some(3));
+    /// assert_eq!(buffer.pop_back(), Some(2));
+    /// assert_eq!(buffer.pop_back(), Some(1));
+    /// assert_eq!(buffer.pop_back(), None);
+    /// ```
+    pub fn pop_back(&mut self) -> Option<T>
+    where
+        T: Clone,
+    {
+        if self.is_empty() {
+            return None;
+        }
+        self.full = false;
+        self.end = (self.end + N - 1) % N;
+        self.buffer[self.end].take()
+    }
+
+    /// Returns the element at `i` in the ring buffer, as
+    /// counted from the start of the buffer, i.e. the Nth oldest
+    /// element.
+    ///
+    /// ```
+    /// # use prelude::*;
+    /// let mut buffer = RingBuffer::from([1u32, 2, 3]);
+    /// assert_eq!(buffer.get(0), Some(1));
+    /// assert_eq!(buffer.get(1), Some(2));
+    /// assert_eq!(buffer.get(2), Some(3));
+    /// assert_eq!(buffer.get(3), None);
+    /// ```
+    pub fn get(&self, i: usize) -> Option<T>
+    where
+        T: Clone,
+    {
+        if i >= self.len() {
+            return None;
+        }
+        let index = (self.start + i) % N;
+        self.buffer[index].clone()
+    }
+
+    /// Returns the number of entries in the ring buffer.
+    ///
+    /// ```
+    /// # use prelude::*;
+    /// let mut buffer = RingBuffer::<u32, 5>::new();
+    /// buffer.extend([1, 2, 3]);
+    /// assert_eq!(buffer.len(), 3);
+    /// ```
+    pub fn len(&self) -> usize {
+        if self.full {
+            N
+        } else if self.end >= self.start {
+            self.end - self.start
+        } else {
+            N - self.start + self.end
+        }
+    }
+
+    /// Returns `true` if the ring buffer is empty.
+    ///
+    /// ```
+    /// # use prelude::*;
+    /// let mut buffer = RingBuffer::<u32, 3>::new();
+    /// assert!(buffer.is_empty());
+    /// buffer.push(1);
+    /// assert!(!buffer.is_empty());
+    /// buffer.pop();
+    /// assert!(buffer.is_empty());
+    /// ```
+    pub fn is_empty(&self) -> bool {
+        self.end == self.start && !self.is_full()
+    }
+
+    /// Returns `true` if the ring buffer is full.
+    ///
+    /// ```
+    /// # use prelude::*;
+    /// let mut buffer = RingBuffer::<u32, 1>::new();
+    /// assert!(!buffer.is_full());
+    /// buffer.push(1);
+    /// assert!(buffer.is_full());
+    /// buffer.pop();
+    /// assert!(!buffer.is_full());
+    /// ```
+    pub fn is_full(&self) -> bool {
+        self.full
+    }
+
+    /// Returns the maximum capacity of the ring buffer.
+    ///
+    /// ```
+    /// # use prelude::*;
+    /// let mut buffer = RingBuffer::<u32, 5>::new();
+    /// assert_eq!(buffer.capacity(), 5);
+    /// ```
+    pub fn capacity(&self) -> usize {
+        N
+    }
+
+    /// Returns the number of empty spaces in the ring buffer.
+    ///
+    /// ```
+    /// # use prelude::*;
+    /// let mut buffer = RingBuffer::<u32, 5>::new();
+    /// assert_eq!(buffer.space(), 5);
+    /// buffer.push(1);
+    /// assert_eq!(buffer.space(), 4);
+    /// ```
+    pub fn space(&self) -> usize {
+        N - self.len()
+    }
+
+    /// Clears the ring buffer.
+    ///
+    /// ```
+    /// # use prelude::*;
+    /// let mut buffer = RingBuffer::from([1u32, 2, 3]);
+    /// buffer.clear();
+    /// assert!(buffer.is_empty());
+    /// ```
+    pub fn clear(&mut self) {
+        self.start = 0;
+        self.end = 0;
+        self.full = false;
+        self.buffer.iter_mut().for_each(|slot| *slot = None);
+    }
+
+    /// Returns an iterator over the ring buffer.
+    ///
+    /// ```
+    /// # use prelude::*;
+    /// let buffer = RingBuffer::from([1u32, 2, 3]);
+    /// let mut iter = buffer.iter();
+    /// assert_eq!(iter.next(), Some(&1));
+    /// assert_eq!(iter.next(), Some(&2));
+    /// assert_eq!(iter.next(), Some(&3));
+    /// assert_eq!(iter.next(), None);
+    /// ```
+    pub fn iter(&self) -> RingBufferIter<'_, T, N> {
+        RingBufferIter {
+            buffer: self,
+            index: 0,
+            index_back: self.len(),
+        }
+    }
+}
+
+impl<T, const N: usize> Default for RingBuffer<T, N> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl<T, const N: usize> Debug for RingBuffer<T, N>
+where
+    T: Clone + Debug,
+{
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
+        f.write_str("Ring buffer: ")?;
+        f.debug_list().entries(self.iter()).finish()
+    }
+}
+
+impl<T, const N: usize> IntoIterator for RingBuffer<T, N>
+where
+    T: Clone,
+{
+    type Item = T;
+    type IntoIter = RingBufferIntoIter<T, N>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        let len = self.len();
+        RingBufferIntoIter {
+            buffer: self,
+            index: 0,
+            index_back: len,
+        }
+    }
+}
+
+/// An iterator over a ring buffer, created by [`RingBuffer::into_iter`].
+pub struct RingBufferIntoIter<T, const N: usize> {
+    buffer: RingBuffer<T, N>,
+    index: usize,
+    index_back: usize,
+}
+
+impl<T, const N: usize> Iterator for RingBufferIntoIter<T, N>
+where
+    T: Clone,
+{
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index == self.index_back {
+            return None;
+        }
+        let index = (self.buffer.start + self.index) % N;
+        self.index += 1;
+        self.buffer.buffer[index].clone()
+    }
+}
+
+impl<T, const N: usize> DoubleEndedIterator for RingBufferIntoIter<T, N>
+where
+    T: Clone,
+{
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.index_back == self.index {
+            return None;
+        }
+        self.index_back -= 1;
+        let index = (self.buffer.start + self.index_back) % N;
+        self.buffer.buffer[index].clone()
+    }
+}
+
+/// An iterator over a ring buffer, created by [`RingBuffer::iter`].
+pub struct RingBufferIter<'a, T, const N: usize> {
+    buffer: &'a RingBuffer<T, N>,
+    index: usize,
+    index_back: usize,
+}
+
+impl<'a, T, const N: usize> Iterator for RingBufferIter<'a, T, N>
+where
+    T: Clone,
+{
+    type Item = &'a T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index == self.index_back {
+            return None;
+        }
+        let index = (self.buffer.start + self.index) % N;
+        self.index += 1;
+        self.buffer.buffer[index].as_ref()
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.len(), Some(self.len()))
+    }
+}
+
+impl<'a, T, const N: usize> DoubleEndedIterator for RingBufferIter<'a, T, N>
+where
+    T: Clone,
+{
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.index_back == self.index {
+            return None;
+        }
+        self.index_back -= 1;
+        let index = (self.buffer.start + self.index_back) % N;
+        self.buffer.buffer[index].as_ref()
+    }
+}
+
+impl<'a, T, const N: usize> ExactSizeIterator for RingBufferIter<'a, T, N>
+where
+    T: Clone,
+{
+    fn len(&self) -> usize {
+        self.buffer.len()
+    }
+}
+
+impl<T, const N: usize> From<[T; N]> for RingBuffer<T, N> {
+    fn from(array: [T; N]) -> Self {
+        Self {
+            buffer: array.map(Some),
+            start: 0,
+            end: N,
+            full: true,
+        }
+    }
+}
+
+impl<T, const N: usize> FromIterator<T> for RingBuffer<T, N> {
+    fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
+        let mut buffer = Self::new();
+        for item in iter {
+            buffer
+                .try_push(item)
+                .expect("RingBuffer::from_iter: buffer full");
+        }
+        buffer
+    }
+}
+
+impl<T, const N: usize> Extend<T> for RingBuffer<T, N> {
+    fn extend<I: IntoIterator<Item = T>>(&mut self, iter: I) {
+        for item in iter {
+            self.push(item);
+        }
+    }
+}
+
+impl<T, const N: usize> Index<usize> for RingBuffer<T, N> {
+    type Output = T;
+
+    fn index(&self, index: usize) -> &Self::Output {
+        if index >= self.len() {
+            panic!("RingBuffer::index: index out of bounds");
+        }
+        let index = (self.start + index) % N;
+        self.buffer[index].as_ref().unwrap()
+    }
+}
 
 /// An iterator that can return its items in chunks instead of one by
 /// one.
@@ -467,5 +884,66 @@ mod tests {
         assert_eq!(3_i64.lcm(4), 12);
         assert_eq!(3_i128.lcm(4), 12);
         assert_eq!(3_isize.lcm(4), 12);
+    }
+
+    #[test]
+    fn ring_buffer_pop_empty() {
+        let mut buffer = RingBuffer::<u32, 3>::new();
+        assert_eq!(buffer.pop(), None);
+    }
+
+    #[test]
+    fn ring_buffer_pop_not_full() {
+        let mut buffer = RingBuffer::<u32, 3>::new();
+        buffer.try_push(1).unwrap();
+        buffer.try_push(2).unwrap();
+        assert_eq!(buffer.pop(), Some(1));
+    }
+
+    #[test]
+    fn ring_buffer_pop_back_back_empty() {
+        let mut buffer = RingBuffer::<u32, 3>::new();
+        assert_eq!(buffer.pop_back(), None);
+    }
+
+    #[test]
+    fn ring_buffer_pop_back_not_full() {
+        let mut buffer = RingBuffer::<u32, 3>::new();
+        buffer.try_push(1).unwrap();
+        buffer.try_push(2).unwrap();
+        assert_eq!(buffer.pop_back(), Some(2));
+    }
+
+    #[test]
+    fn ring_buffer_is_empty_when_full() {
+        let buffer = RingBuffer::from([1u32, 2, 3]);
+        assert!(!buffer.is_empty());
+    }
+
+    #[test]
+    fn ring_buffer_from_slice_is_full() {
+        let buffer = RingBuffer::from([1u32, 2, 3]);
+        assert!(buffer.is_full());
+    }
+
+    #[test]
+    fn ring_buffer_iter_rev() {
+        let buffer = RingBuffer::from([1u32, 2, 3]);
+        let mut iter = buffer.iter().rev();
+        assert_eq!(iter.next(), Some(&3));
+        assert_eq!(iter.next(), Some(&2));
+        assert_eq!(iter.next(), Some(&1));
+        assert_eq!(iter.next(), None);
+    }
+
+    #[test]
+    fn ring_buffer_iter_from_both_ends() {
+        let buffer = RingBuffer::from([1u32, 2, 3]);
+        let mut iter = buffer.iter();
+        assert_eq!(iter.next(), Some(&1));
+        assert_eq!(iter.next_back(), Some(&3));
+        assert_eq!(iter.next(), Some(&2));
+        assert_eq!(iter.next_back(), None);
+        assert_eq!(iter.next(), None);
     }
 }
