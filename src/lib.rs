@@ -314,6 +314,10 @@ where
         self.index += 1;
         self.buffer.buffer[index].clone()
     }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (self.len(), Some(self.len()))
+    }
 }
 
 impl<T, const N: usize> DoubleEndedIterator for RingBufferIntoIter<T, N>
@@ -327,6 +331,15 @@ where
         self.index_back -= 1;
         let index = (self.buffer.start + self.index_back) % N;
         self.buffer.buffer[index].clone()
+    }
+}
+
+impl<T, const N: usize> ExactSizeIterator for RingBufferIntoIter<T, N>
+where
+    T: Clone,
+{
+    fn len(&self) -> usize {
+        self.buffer.len()
     }
 }
 
@@ -834,6 +847,21 @@ where
                 Some(dx)
             }
         }
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let (lower, upper) = self.iter.size_hint();
+        (lower.saturating_sub(1), upper.map(|u| u.saturating_sub(1)))
+    }
+}
+
+impl<I> ExactSizeIterator for Derivative<I>
+where
+    I: Iterator + ExactSizeIterator,
+    I::Item: Copy + Sub,
+{
+    fn len(&self) -> usize {
+        self.iter.len().saturating_sub(1)
     }
 }
 
